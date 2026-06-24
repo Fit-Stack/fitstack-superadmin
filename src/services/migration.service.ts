@@ -1,6 +1,15 @@
 import api from '@/lib/axios';
 import { API_ENDPOINTS } from '@/lib/constants';
 
+export interface MigrationSyncJob {
+  running: boolean;
+  startedAt: string;
+  finishedAt?: string | null;
+  executed: number;
+  failed: number;
+  error?: string | null;
+}
+
 export interface MigrationStatus {
   tenantId: string;
   totalMigrations: number;
@@ -10,18 +19,16 @@ export interface MigrationStatus {
   pendingMigrationNames: string[];
   lastExecuted: string | null;
   isUpToDate: boolean;
+  sync?: MigrationSyncJob | null;
 }
 
-export interface MigrationSyncResult {
+// The sync endpoint now returns immediately (202) and runs in the background.
+export interface MigrationSyncStart {
   success: boolean;
+  status: 'started' | 'running';
   message: string;
   tenantId: string;
-  migrationsExecuted: number;
-  migrationsFailed: number;
-  executedMigrations: string[];
-  failedMigrationNames: string[];
-  executionTimeMs: number;
-  status: MigrationStatus;
+  startedAt: string;
 }
 
 class MigrationService {
@@ -32,8 +39,8 @@ class MigrationService {
     return data;
   }
 
-  async sync(tenantId: string, force = false): Promise<MigrationSyncResult> {
-    const { data } = await api.post<MigrationSyncResult>(
+  async sync(tenantId: string, force = false): Promise<MigrationSyncStart> {
+    const { data } = await api.post<MigrationSyncStart>(
       API_ENDPOINTS.MIGRATIONS_SYNC(tenantId),
       { force },
     );

@@ -46,22 +46,64 @@ export default function TenantMigrationsPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);
 
+  const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+  // The sync now runs in the background on the server (returns 202 instantly),
+  // so we poll the status endpoint for live progress instead of waiting on one
+  // long request that would time out.
+  const pollUntilDone = async (tenantId: string) => {
+    const maxAttempts = 240; // ~10 min at 2.5s intervals
+    for (let i = 0; i < maxAttempts; i++) {
+      await sleep(2500);
+      let st: MigrationStatus;
+      try {
+        st = await migrationService.getStatus(tenantId);
+      } catch {
+        continue; // transient error — keep polling
+      }
+      setStatus(st);
+
+      // Job has stopped running (or there's no job record) → we're finished.
+      if (!st.sync || st.sync.running === false) {
+        if (st.sync?.error) {
+          showError('Sync finished with an error', st.sync.error);
+        } else if (st.failedMigrations > 0) {
+          showError(
+            'Sync finished with failures',
+            `${st.failedMigrations} migration(s) failed — check server logs.`,
+          );
+        } else if (st.isUpToDate) {
+          success('Migrations synced', 'All migrations are up to date.');
+        } else {
+          success(
+            'Sync finished',
+            `${st.pendingMigrations} still pending — run Sync again to continue.`,
+          );
+        }
+        return;
+      }
+    }
+    showError(
+      'Still running',
+      'Sync is taking a while. It continues on the server — refresh status shortly.',
+    );
+  };
+
   const runSync = async () => {
     if (!id) return;
     setSyncing(true);
     try {
       const res = await migrationService.sync(id, false);
-      if (res.success) {
-        success(
-          'Migrations synced',
-          `${res.migrationsExecuted} run in ${res.executionTimeMs}ms.`,
-        );
-      } else {
-        showError('Sync had failures', res.message);
-      }
-      setStatus(res.status);
+      success(
+        res.status === 'running' ? 'Sync already running' : 'Sync started',
+        'Running migrations in the background — this can take a few minutes.',
+      );
+      await pollUntilDone(id);
     } catch (err: any) {
-      showError('Sync failed', err.response?.data?.message || err.message);
+      showError(
+        'Sync failed to start',
+        err.response?.data?.message || err.message,
+      );
     } finally {
       setSyncing(false);
     }
